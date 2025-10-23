@@ -1,19 +1,29 @@
 #include <windows.h>
-#include <iostream>
+#include <gdiplus.h>
 #include <shellapi.h>
+#include <iostream>
+
+#pragma comment (lib,"Gdiplus.lib")
 
 #define ID_TRAY_APP_ICON 1001
 #define ID_TAKE_SCREENSHOT 1002
 #define ID_EXIT 1003
 
+// Forward declarations
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void TakeScreenshot();
-bool SaveBitmapToFile(HBITMAP hBitmap, HDC hDC, LPCSTR filename);
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid);
 
+// Globals
 HHOOK hhkLowLevelKybd = NULL;
+ULONG_PTR gdiplusToken;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Initialize GDI+
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
     const char CLASS_NAME[] = "ScreenshotAppClass";
 
     WNDCLASS wc = {};
@@ -29,13 +39,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         "Screenshot App",
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
-        NULL,
-        NULL,
-        hInstance,
-        NULL
+        NULL, NULL, hInstance, NULL
     );
 
     if (hwnd == NULL) {
+        Gdiplus::GdiplusShutdown(gdiplusToken);
         return 0;
     }
 
@@ -50,16 +58,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     UnhookWindowsHookEx(hhkLowLevelKybd);
+    Gdiplus::GdiplusShutdown(gdiplusToken);
     return 0;
 }
 
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION) {
-        if (wParam == WM_KEYDOWN) {
-            KBDLLHOOKSTRUCT* pkbhs = (KBDLLHOOKSTRUCT*)lParam;
-            if (pkbhs->vkCode == VK_SNAPSHOT) {
-                TakeScreenshot();
-            }
+    if (nCode == HC_ACTION && wParam == WM_KEYDOWN) {
+        KBDLLHOOKSTRUCT* pkbhs = (KBDLLHOOKSTRUCT*)lParam;
+        if (pkbhs->vkCode == VK_SNAPSHOT) {
+            TakeScreenshot();
         }
     }
     return CallNextHookEx(hhkLowLevelKybd, nCode, wParam, lParam);
@@ -80,17 +87,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             break;
         }
         case WM_USER + 1: {
-            switch (lParam) {
-                case WM_RBUTTONUP: {
-                    POINT curPoint;
-                    GetCursorPos(&curPoint);
-                    HMENU hPopupMenu = CreatePopupMenu();
-                    InsertMenu(hPopupMenu, 0, MF_BYPOSITION | MF_STRING, ID_TAKE_SCREENSHOT, "Take Screenshot");
-                    InsertMenu(hPopupMenu, 1, MF_BYPOSITION | MF_STRING, ID_EXIT, "Exit");
-                    SetForegroundWindow(hwnd);
-                    TrackPopupMenu(hPopupMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, curPoint.x, curPoint.y, 0, hwnd, NULL);
-                    break;
-                }
+            if (lParam == WM_RBUTTONUP) {
+                POINT curPoint;
+                GetCursorPos(&curPoint);
+                HMENU hPopupMenu = CreatePopupMenu();
+                InsertMenu(hPopupMenu, 0, MF_BYPOSITION | MF_STRING, ID_TAKE_SCREENSHOT, "Take Screenshot");
+                InsertMenu(hPopupMenu, 1, MF_BYPOSITION | MF_STRING, ID_EXIT, "Exit");
+                SetForegroundWindow(hwnd);
+                TrackPopupMenu(hPopupMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, curPoint.x, curPoint.y, 0, hwnd, NULL);
             }
             break;
         }
@@ -121,65 +125,47 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 void TakeScreenshot() {
-    HDC hScreenDC = GetDC(nullptr);
+    HDC hScreenDC = GetDC(NULL);
     HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
 
     int width = GetDeviceCaps(hScreenDC, HORZRES);
     int height = GetDeviceCaps(hScreenDC, VERTRES);
 
     HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-    SelectObject(hMemoryDC, hBitmap);
+    HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemoryDC, hBitmap);
 
-    BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY | CAPTUREBLT);
+    BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
+    SelectObject(hMemoryDC, hOldBitmap);
 
-    SaveBitmapToFile(hBitmap, hMemoryDC, "screenshot.bmp");
+    // Save the bitmap to a PNG file
+    Gdiplus::Bitmap bitmap(hBitmap, NULL);
+    CLSID pngClsid;
+    GetEncoderClsid(L"image/png", &pngClsid);
+    bitmap.Save(L"screenshot.png", &pngClsid, NULL);
 
+    // Cleanup
     DeleteObject(hBitmap);
     DeleteDC(hMemoryDC);
-    ReleaseDC(nullptr, hScreenDC);
+    ReleaseDC(NULL, hScreenDC);
 }
 
-bool SaveBitmapToFile(HBITMAP hBitmap, HDC hDC, LPCSTR filename) {
-    BITMAP bmp;
-    GetObject(hBitmap, sizeof(BITMAP), &bmp);
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0;
+    UINT size = 0;
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
 
-    BITMAPFILEHEADER bmfHeader;
-    BITMAPINFOHEADER bi;
+    Gdiplus::ImageCodecInfo* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+    if (pImageCodecInfo == NULL) return -1;
 
-    bi.biSize = sizeof(BITMAPINFOHEADER);
-    bi.biWidth = bmp.bmWidth;
-    bi.biHeight = bmp.bmHeight;
-    bi.biPlanes = 1;
-    bi.biBitCount = 32;
-    bi.biCompression = BI_RGB;
-    bi.biSizeImage = 0;
-    bi.biXPelsPerMeter = 0;
-    bi.biYPelsPerMeter = 0;
-    bi.biClrUsed = 0;
-    bi.biClrImportant = 0;
-
-    DWORD dwBmpSize = ((bmp.bmWidth * bi.biBitCount + 31) / 32) * 4 * bmp.bmHeight;
-    HANDLE hDIB = GlobalAlloc(GHND, dwBmpSize);
-    char* lpbitmap = (char*)GlobalLock(hDIB);
-
-    GetDIBits(hDC, hBitmap, 0, (UINT)bmp.bmHeight, lpbitmap, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
-
-    HANDLE hFile = CreateFileA(filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-
-    DWORD dwSizeofDIB = dwBmpSize + sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-
-    bmfHeader.bfOffBits = sizeof(BITMAPFILEHEADER) + sizeof(BITMAPINFOHEADER);
-    bmfHeader.bfSize = dwSizeofDIB;
-    bmfHeader.bfType = 0x4D42;
-
-    DWORD dwBytesWritten;
-    WriteFile(hFile, (LPSTR)&bmfHeader, sizeof(BITMAPFILEHEADER), &dwBytesWritten, nullptr);
-    WriteFile(hFile, (LPSTR)&bi, sizeof(BITMAPINFOHEADER), &dwBytesWritten, nullptr);
-    WriteFile(hFile, lpbitmap, dwBmpSize, &dwBytesWritten, nullptr);
-
-    GlobalUnlock(hDIB);
-    GlobalFree(hDIB);
-    CloseHandle(hFile);
-
-    return true;
+    GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
+        }
+    }
+    free(pImageCodecInfo);
+    return -1;
 }
