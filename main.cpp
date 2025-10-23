@@ -1,6 +1,4 @@
-// Define Windows 10 API version before including any headers
-#define WINVER 0x0A00
-#define _WIN32_WINNT 0x0A00
+#include "config.h"
 
 #include <windows.h>
 #include <gdiplus.h>
