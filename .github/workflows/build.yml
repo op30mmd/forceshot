@@ -17,7 +17,7 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
-        cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib gdiplus.lib d3d11.lib dxgi.lib
+        cl.exe /D "_WIN32_WINNT=0x0A00" /D "WINVER=0x0A00" /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib gdiplus.lib d3d11.lib dxgi.lib
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
