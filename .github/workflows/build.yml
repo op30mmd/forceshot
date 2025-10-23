@@ -1,4 +1,4 @@
-name: Build Screenshot App
+name: Diagnose Windows SDKs
 
 on:
   push:
@@ -7,20 +7,12 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  diagnose:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Compile application
+    - name: List available Windows SDK versions
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 10.0.19041.0
-        cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib gdiplus.lib d3d11.lib dxgi.lib
-
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: screenshot-app
-        path: main.exe
+        echo "Listing contents of C:\Program Files (x86)\Windows Kits\10\Include..."
+        dir "C:\Program Files (x86)\Windows Kits\10\Include"
