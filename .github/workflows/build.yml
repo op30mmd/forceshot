@@ -13,28 +13,22 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Stage 1 - Update Visual Studio Installer
+    - name: Stage 1 - Add Windows 11 SDK Component via VS Installer
       shell: cmd
       run: |
-        echo "Updating the Visual Studio Installer..."
-        call "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" update --quiet --wait --norestart
+        echo "Adding Windows 11 SDK (10.0.22621.0) component..."
+        call "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --quiet --norestart --wait
 
-    - name: Stage 2 - Add Windows SDK Component via VS Installer
-      shell: cmd
-      run: |
-        echo "Adding Windows 10 SDK (10.0.19041.0) component..."
-        call "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --norestart --wait
-
-    - name: Stage 3 - Verify SDK Installation
+    - name: Stage 2 - Verify SDK Installation
       shell: cmd
       run: |
         echo "Verifying SDK installation..."
-        dir "C:\Program Files (x86)\Windows Kits\10\Include\10.0.19041.0\um\windows.h"
+        dir "C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\um\windows.h"
 
-    - name: Stage 4 - Compile application
+    - name: Stage 3 - Compile application
       shell: cmd
       run: |
-        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 10.0.19041.0
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 10.0.22621.0
         cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib gdiplus.lib d3d11.lib dxgi.lib
 
     - name: Upload artifact
