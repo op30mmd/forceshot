@@ -13,13 +13,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install Windows SDK
+    - name: Stage 1 - Install Windows SDK
       shell: powershell
       run: |
         Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2120843" -OutFile "winsdksetup.exe"
-        Start-Process -FilePath "winsdksetup.exe" -ArgumentList "/features OptionId.DesktopCPPx64 /q" -Wait
+        Start-Process -FilePath "winsdksetup.exe" -ArgumentList "/features OptionId.WindowsDesktopSdk /q" -Wait
 
-    - name: Compile application
+    - name: Stage 2 - Verify SDK Installation
+      shell: cmd
+      run: |
+        echo "Verifying SDK installation..."
+        dir "C:\Program Files (x86)\Windows Kits\10\Include\10.0.19041.0\um\windows.h"
+
+    - name: Stage 3 - Compile application
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 10.0.19041.0
