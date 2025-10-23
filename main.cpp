@@ -1,4 +1,6 @@
-#define _WIN32_WINNT 0x0A00 // Define Windows 10 API version
+// Define Windows 10 API version before including any headers
+#define WINVER 0x0A00
+#define _WIN32_WINNT 0x0A00
 
 #include <windows.h>
 #include <gdiplus.h>
@@ -121,7 +123,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 InsertMenu(hPopupMenu, 0, MF_BYPOSITION | MF_STRING, ID_TAKE_SCREENSHOT, "Take Screenshot");
                 InsertMenu(hPopupMenu, 1, MF_BYPOSITION | MF_STRING, ID_EXIT, "Exit");
                 SetForegroundWindow(hwnd);
-                TrackPopupMenu(hPopupMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, curPont.x, curPoint.y, 0, hwnd, NULL);
+                TrackPopupMenu(hPopupMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, curPoint.x, curPoint.y, 0, hwnd, NULL);
             }
             break;
         }
