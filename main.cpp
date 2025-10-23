@@ -65,8 +65,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode == HC_ACTION && wParam == WM_KEYDOWN) {
         KBDLLHOOKSTRUCT* pkbhs = (KBDLLHOOKSTRUCT*)lParam;
-        if (pkbhs->vkCode == VK_SNAPSHOT) {
-            TakeScreenshot();
+        // Check for 'S' key (virtual key code for 'S' is 0x53)
+        if (pkbhs->vkCode == 0x53) {
+            // Check if Ctrl and Shift are also pressed
+            if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
+                TakeScreenshot();
+            }
         }
     }
     return CallNextHookEx(hhkLowLevelKybd, nCode, wParam, lParam);
