@@ -13,11 +13,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Stage 1 - Install Windows SDK
-      shell: powershell
+    - name: Stage 1 - Add Windows SDK Component via VS Installer
+      shell: cmd
       run: |
-        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/?linkid=2120843" -OutFile "winsdksetup.exe"
-        Start-Process -FilePath "winsdksetup.exe" -ArgumentList "/features OptionId.WindowsDesktopSdk /q" -Wait
+        echo "Adding Windows 10 SDK (10.0.19041.0) component..."
+        call "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --quiet --norestart --wait
 
     - name: Stage 2 - Verify SDK Installation
       shell: cmd
