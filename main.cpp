@@ -2,8 +2,12 @@
 #include <gdiplus.h>
 #include <shellapi.h>
 #include <iostream>
+#include <d3d11.h>
+#include <dxgi1_2.h>
 
-#pragma comment (lib,"Gdiplus.lib")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "gdiplus.lib")
 
 #define ID_TRAY_APP_ICON 1001
 #define ID_TAKE_SCREENSHOT 1002
@@ -11,12 +15,10 @@
 
 // Forward declarations
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
 void TakeScreenshot();
 int GetEncoderClsid(const WCHAR* format, CLSID* pClsid);
 
 // Globals
-HHOOK hhkLowLevelKybd = NULL;
 ULONG_PTR gdiplusToken;
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -47,9 +49,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0;
     }
 
-    ShowWindow(hwnd, SW_HIDE);
+    // Register for Raw Input from the keyboard
+    RAWINPUTDEVICE rid;
+    rid.usUsagePage = 0x01; // Generic Desktop Controls
+    rid.usUsage = 0x06;     // Keyboard
+    rid.dwFlags = RIDEV_INPUTSINK; // Receive input even when not in foreground
+    rid.hwndTarget = hwnd;
+    RegisterRawInputDevices(&rid, 1, sizeof(rid));
 
-    hhkLowLevelKybd = SetWindowsHookEx(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
+    ShowWindow(hwnd, SW_HIDE);
 
     MSG msg = {};
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -57,27 +65,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         DispatchMessage(&msg);
     }
 
-    UnhookWindowsHookEx(hhkLowLevelKybd);
     Gdiplus::GdiplusShutdown(gdiplusToken);
     return 0;
 }
 
-LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode == HC_ACTION && wParam == WM_KEYDOWN) {
-        KBDLLHOOKSTRUCT* pkbhs = (KBDLLHOOKSTRUCT*)lParam;
-        // Check for 'S' key (virtual key code for 'S' is 0x53)
-        if (pkbhs->vkCode == 0x53) {
-            // Check if Ctrl and Shift are also pressed
-            if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
-                TakeScreenshot();
-            }
-        }
-    }
-    return CallNextHookEx(hhkLowLevelKybd, nCode, wParam, lParam);
-}
-
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
+        case WM_INPUT: {
+            UINT dwSize = 0;
+            GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &dwSize, sizeof(RAWINPUTHEADER));
+            LPBYTE lpb = new BYTE[dwSize];
+            if (lpb == NULL) {
+                return 0;
+            }
+
+            if (GetRawInputData((HRAWINPUT)lParam, RID_INPUT, lpb, &dwSize, sizeof(RAWINPUTHEADER)) != dwSize) {
+                delete[] lpb;
+                return 0;
+            }
+
+            RAWINPUT* raw = (RAWINPUT*)lpb;
+
+            if (raw->header.dwType == RIM_TYPEKEYBOARD) {
+                // Check for 'S' key press (virtual key code for 'S' is 0x53)
+                if (raw->data.keyboard.VKey == 0x53 && raw->data.keyboard.Message == WM_KEYDOWN) {
+                    // Check if Ctrl and Shift are also pressed
+                    if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && (GetAsyncKeyState(VK_SHIFT) & 0x8000)) {
+                        TakeScreenshot();
+                    }
+                }
+            }
+
+            delete[] lpb;
+            return 0;
+        }
         case WM_CREATE: {
             NOTIFYICONDATA nid = {};
             nid.cbSize = sizeof(NOTIFYICONDATA);
@@ -129,28 +150,120 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 void TakeScreenshot() {
-    HDC hScreenDC = GetDC(NULL);
-    HDC hMemoryDC = CreateCompatibleDC(hScreenDC);
+    HRESULT hr;
 
-    int width = GetDeviceCaps(hScreenDC, HORZRES);
-    int height = GetDeviceCaps(hScreenDC, VERTRES);
+    // Declare COM interfaces
+    IDXGIFactory1* pFactory = nullptr;
+    IDXGIAdapter1* pAdapter = nullptr;
+    ID3D11Device* pDevice = nullptr;
+    ID3D11DeviceContext* pContext = nullptr;
+    IDXGIDevice* pDxgiDevice = nullptr;
+    IDXGIAdapter* pDxgiAdapter = nullptr;
+    IDXGIOutput* pDxgiOutput = nullptr;
+    IDXGIOutput1* pDxgiOutput1 = nullptr;
+    IDXGIDesktopDuplication* pDeskDupl = nullptr;
+    ID3D11Texture2D* pStagingTexture = nullptr;
+    IDXGIResource* pDesktopResource = nullptr;
+    ID3D11Texture2D* pDesktopTexture = nullptr;
 
-    HBITMAP hBitmap = CreateCompatibleBitmap(hScreenDC, width, height);
-    HBITMAP hOldBitmap = (HBITMAP)SelectObject(hMemoryDC, hBitmap);
+    // Create DXGI factory
+    hr = CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)(&pFactory));
+    if (FAILED(hr)) goto cleanup;
 
-    BitBlt(hMemoryDC, 0, 0, width, height, hScreenDC, 0, 0, SRCCOPY);
-    SelectObject(hMemoryDC, hOldBitmap);
+    // Enumerate adapters
+    hr = pFactory->EnumAdapters1(0, &pAdapter);
+    if (FAILED(hr)) goto cleanup;
 
-    // Save the bitmap to a PNG file
-    Gdiplus::Bitmap bitmap(hBitmap, NULL);
-    CLSID pngClsid;
-    GetEncoderClsid(L"image/png", &pngClsid);
-    bitmap.Save(L"screenshot.png", &pngClsid, NULL);
+    // Create D3D11 device
+    D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+    hr = D3D11CreateDevice(pAdapter, D3D_DRIVER_TYPE_UNKNOWN, NULL, 0, &featureLevel, 1, D3D11_SDK_VERSION, &pDevice, NULL, &pContext);
+    if (FAILED(hr)) goto cleanup;
 
-    // Cleanup
-    DeleteObject(hBitmap);
-    DeleteDC(hMemoryDC);
-    ReleaseDC(NULL, hScreenDC);
+    // Get DXGI device
+    hr = pDevice->QueryInterface(__uuidof(IDXGIDevice), (void**)(&pDxgiDevice));
+    if (FAILED(hr)) goto cleanup;
+
+    // Get DXGI adapter
+    hr = pDxgiDevice->GetParent(__uuidof(IDXGIAdapter), (void**)(&pDxgiAdapter));
+    if (FAILED(hr)) goto cleanup;
+
+    // Get DXGI output
+    hr = pDxgiAdapter->EnumOutputs(0, &pDxgiOutput);
+    if (FAILED(hr)) goto cleanup;
+
+    // Get output 1 interface
+    hr = pDxgiOutput->QueryInterface(__uuidof(IDXGIOutput1), (void**)(&pDxgiOutput1));
+    if (FAILED(hr)) goto cleanup;
+
+    // Create desktop duplication
+    hr = pDxgiOutput1->DuplicateOutput(pDevice, &pDeskDupl);
+    if (FAILED(hr)) goto cleanup;
+
+    // Get output description for texture size
+    DXGI_OUTPUT_DESC desc;
+    pDxgiOutput->GetDesc(&desc);
+
+    // Create a texture to hold the screen image
+    D3D11_TEXTURE2D_DESC texDesc;
+    texDesc.Width = desc.DesktopCoordinates.right - desc.DesktopCoordinates.left;
+    texDesc.Height = desc.DesktopCoordinates.bottom - desc.DesktopCoordinates.top;
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.SampleDesc.Quality = 0;
+    texDesc.Usage = D3D11_USAGE_STAGING;
+    texDesc.BindFlags = 0;
+    texDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    texDesc.MiscFlags = 0;
+    hr = pDevice->CreateTexture2D(&texDesc, NULL, &pStagingTexture);
+    if (FAILED(hr)) goto cleanup;
+
+    // Acquire the next frame
+    DXGI_OUTDUPL_FRAME_INFO frameInfo;
+    hr = pDeskDupl->AcquireNextFrame(500, &frameInfo, &pDesktopResource);
+    if (FAILED(hr) || pDesktopResource == nullptr) goto cleanup;
+
+    // Copy the frame to the staging texture
+    hr = pDesktopResource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)(&pDesktopTexture));
+    if(FAILED(hr)) goto cleanup;
+
+    pContext->CopyResource(pStagingTexture, pDesktopTexture);
+
+    // Map the staging texture to access the raw pixel data
+    D3D11_MAPPED_SUBRESOURCE mappedResource;
+    hr = pContext->Map(pStagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
+    if (FAILED(hr)) goto cleanup;
+
+    // Create GDI+ bitmap from the raw data and save to file
+    {
+        Gdiplus::Bitmap bitmap(texDesc.Width, texDesc.Height, mappedResource.RowPitch, PixelFormat32bppARGB, (BYTE*)mappedResource.pData);
+        CLSID pngClsid;
+        GetEncoderClsid(L"image/png", &pngClsid);
+        bitmap.Save(L"screenshot.png", &pngClsid, NULL);
+    }
+
+    // Unmap the texture
+    pContext->Unmap(pStagingTexture, 0);
+
+cleanup:
+    // Release all COM objects
+    if (pDesktopTexture) pDesktopTexture->Release();
+    if (pDesktopResource) pDesktopResource->Release();
+    if (pStagingTexture) pStagingTexture->Release();
+    if (pDeskDupl) {
+        // Must release the frame before releasing the duplication interface
+        pDeskDupl->ReleaseFrame();
+        pDeskDupl->Release();
+    }
+    if (pDxgiOutput1) pDxgiOutput1->Release();
+    if (pDxgiOutput) pDxgiOutput->Release();
+    if (pDxgiAdapter) pDxgiAdapter->Release();
+    if (pDxgiDevice) pDxgiDevice->Release();
+    if (pContext) pContext->Release();
+    if (pDevice) pDevice->Release();
+    if (pAdapter) pAdapter->Release();
+    if (pFactory) pFactory->Release();
 }
 
 int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
