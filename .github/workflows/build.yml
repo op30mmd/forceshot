@@ -13,11 +13,23 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up MSVC
-      uses: microsoft/setup-msvc@v1.1
+    - name: Stage 1 - Add Windows 11 SDK Component via VS Installer
+      shell: cmd
+      run: |
+        echo "Adding Windows 11 SDK (10.0.22621.0) component..."
+        call "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe" modify --installPath "C:\Program Files\Microsoft Visual Studio\2022\Enterprise" --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --quiet --norestart --wait
 
-    - name: Compile application
-      run: cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib
+    - name: Stage 2 - Verify SDK Installation
+      shell: cmd
+      run: |
+        echo "Verifying SDK installation..."
+        dir "C:\Program Files (x86)\Windows Kits\10\Include\10.0.22621.0\um\windows.h"
+
+    - name: Stage 3 - Compile application
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64 10.0.22621.0
+        cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib gdiplus.lib d3d11.lib dxgi.lib
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
