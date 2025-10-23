@@ -11,16 +11,16 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up MSVC
-      uses: microsoft/setup-msvc@v1
+      uses: microsoft/setup-msvc@v1.1
 
     - name: Compile application
       run: cl.exe /EHsc main.cpp /link /SUBSYSTEM:WINDOWS user32.lib gdi32.lib shell32.lib
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: screenshot-app
         path: main.exe
